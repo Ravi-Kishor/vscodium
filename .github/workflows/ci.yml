@@ -1,0 +1,106 @@
+name: Build & Release VSCodium (Arch)
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "0 */6 * * *"
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    container:
+      image: ghcr.io/archlinux/archlinux:latest
+      volumes:
+        - ${{ github.workspace }}:/work
+
+    steps:
+      # -------------------------
+      # Checkout
+      # -------------------------
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # -------------------------
+      # Install dependencies
+      # -------------------------
+      - name: Install build dependencies
+        run: |
+          pacman -Syyu --noconfirm \
+            base-devel \
+            git \
+            jq \
+            pacman-contrib
+
+      # -------------------------
+      # Read pkgver (ALWAYS)
+      # -------------------------
+      - name: Read version from PKGBUILD
+        id: pkgver
+        run: |
+          PKGVER=$(grep '^pkgver=' PKGBUILD | cut -d= -f2)
+          echo "version=$PKGVER" >> "$GITHUB_OUTPUT"
+          echo "Using pkgver: $PKGVER"
+
+      # -------------------------
+      # Check upstream version
+      # -------------------------
+      - name: Check upstream VSCodium version
+        id: check
+        run: |
+          UPSTREAM=$(curl -fsSL https://api.github.com/repos/VSCodium/vscodium/releases/latest \
+            | jq -r '.tag_name' | sed 's/^v//')
+
+          CURRENT="${{ steps.pkgver.outputs.version }}"
+
+          echo "Upstream version: $UPSTREAM"
+          echo "Current version:  $CURRENT"
+
+          if [[ "$UPSTREAM" == "$CURRENT" ]]; then
+            echo "update=false" >> $GITHUB_OUTPUT
+          else
+            echo "update=true" >> $GITHUB_OUTPUT
+            echo "version=$UPSTREAM" >> $GITHUB_OUTPUT
+          fi
+
+      # -------------------------
+      # Bump pkgver if needed
+      # -------------------------
+      - name: Bump pkgver
+        if: steps.check.outputs.update == 'true'
+        run: |
+          sed -i "s/^pkgver=.*/pkgver=${{ steps.check.outputs.version }}/" PKGBUILD
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add PKGBUILD
+          git commit -m "chore: bump codium to ${{ steps.check.outputs.version }}"
+          git push
+
+      # -------------------------
+      # Build package
+      # -------------------------
+      - name: Build Codium package
+        run: |
+          useradd -m builder
+          echo "builder ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
+          chmod -R 777 /work
+          cd /work
+          su builder -c 'makepkg --syncdeps --clean --noconfirm'
+
+      # -------------------------
+      # Upload GitHub Release
+      # -------------------------
+      - name: Upload package to GitHub Release
+        uses: svenstaro/upload-release-action@v2
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          tag: v${{ steps.pkgver.outputs.version }}
+          release_name: Codium v${{ steps.pkgver.outputs.version }}
+          prerelease: false
+          overwrite: true
+          file_glob: true
+          file: "*.pkg.tar.zst"
