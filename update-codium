@@ -1,0 +1,122 @@
+#!/bin/bash
+set -euo pipefail
+
+APP_NAME="Codium"
+REPO="Ravi-Kishor/vscodium"
+INSTALL_DIR="/opt/codium"
+BIN_LINK="/usr/bin/codium"
+DESKTOP_FILE="/usr/share/applications/codium.desktop"
+
+require() {
+  command -v "$1" >/dev/null || {
+    echo "❌ Required command '$1' not found"
+    exit 1
+  }
+}
+
+require curl
+require jq
+require tar
+require sudo
+
+get_installed_version() {
+  if [[ -x "$INSTALL_DIR/bin/codium" ]]; then
+    "$INSTALL_DIR/bin/codium" --version | head -n1 | awk '{print $1}'
+  else
+    echo "Not Installed"
+  fi
+}
+
+INSTALLED_VERSION=$(get_installed_version)
+
+echo "Installed Codium version: $INSTALLED_VERSION"
+
+echo "📡 Fetching latest release metadata…"
+RELEASE_JSON=$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest")
+
+TAG_NAME=$(echo "$RELEASE_JSON" | jq -r '.tag_name')
+echo "Latest Codium release tag: $TAG_NAME"
+
+ASSET_URL=$(echo "$RELEASE_JSON" | jq -r '
+  .assets[]
+  | select(.name | test("^codium-[0-9].*-x86_64\\.pkg\\.tar\\.zst$"))
+  | .browser_download_url
+')
+
+if [[ -z "$ASSET_URL" || "$ASSET_URL" == "null" ]]; then
+  echo "❌ Could not find Codium package in release $TAG_NAME"
+  exit 1
+fi
+
+PKG_NAME=$(basename "$ASSET_URL")
+LATEST_VERSION=$(echo "$PKG_NAME" | sed -E 's/^codium-([0-9.]+)-.*/\1/')
+
+echo "Latest Codium version:    $LATEST_VERSION"
+echo
+
+echo "Choose an action:"
+echo "1) Update (skip if already latest)"
+echo "2) Force install"
+read -rp "Enter choice (1/2): " CHOICE
+
+if [[ "$CHOICE" == "1" ]]; then
+  if [[ "$INSTALLED_VERSION" == "$LATEST_VERSION" ]]; then
+    echo "✅ Codium is already up to date"
+    exit 0
+  fi
+  echo "⬆️ Updating Codium $INSTALLED_VERSION → $LATEST_VERSION"
+elif [[ "$CHOICE" == "2" ]]; then
+  echo "🛠️ Force installing Codium $LATEST_VERSION"
+else
+  echo "❌ Invalid choice"
+  exit 1
+fi
+
+TMP_DIR=$(mktemp -d)
+cd "$TMP_DIR"
+
+echo "📥 Downloading:"
+echo "   $PKG_NAME"
+curl -L --fail -o "$PKG_NAME" "$ASSET_URL"
+
+echo "🗑️ Removing old installation…"
+sudo rm -rf "$INSTALL_DIR"
+
+echo "📦 Extracting package…"
+sudo tar --zstd -xf "$PKG_NAME" -C /
+
+echo "🔗 Ensuring binary symlink…"
+sudo ln -sf "$INSTALL_DIR/bin/codium" "$BIN_LINK"
+
+echo "📝 Installing desktop entry…"
+sudo tee "$DESKTOP_FILE" >/dev/null <<'EOF'
+[Desktop Entry]
+Name=Codium
+Comment=Code Editing. Redefined.
+GenericName=Text Editor
+Exec=/usr/bin/codium %F
+Icon=vscodium
+Type=Application
+StartupNotify=false
+StartupWMClass=VSCodium
+Categories=Utility;Development;IDE;
+MimeType=text/plain;inode/directory;
+Actions=new-empty-window;
+Keywords=vscode;
+
+[Desktop Action new-empty-window]
+Name=New Empty Window
+Exec=/usr/bin/codium --new-window %F
+Icon=vscodium
+EOF
+
+if command -v update-desktop-database >/dev/null; then
+  sudo update-desktop-database /usr/share/applications || true
+fi
+
+cd /
+rm -rf "$TMP_DIR"
+
+echo
+echo "✅ Codium $LATEST_VERSION installed successfully!"
+echo "➡ Run: codium"
