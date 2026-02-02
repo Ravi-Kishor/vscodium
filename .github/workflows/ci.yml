@@ -31,9 +31,9 @@ jobs:
           echo "Current pkgver: $PKGVER"
 
       # -------------------------
-      # Check upstream VSCodium version
+      # Check upstream version
       # -------------------------
-      - name: Check upstream version
+      - name: Check upstream VSCodium version
         id: check
         run: |
           UPSTREAM=$(curl -fsSL https://api.github.com/repos/VSCodium/vscodium/releases/latest \
@@ -68,9 +68,9 @@ jobs:
           git push
 
       # -------------------------
-      # Build inside Arch container
+      # Build package (ARCH CONTAINER)
       # -------------------------
-      - name: Build package (Arch container)
+      - name: Build package
         run: |
           docker run --rm \
             -v "$PWD:/work" \
@@ -78,8 +78,12 @@ jobs:
             archlinux:latest \
             bash -c '
               pacman -Syyu --noconfirm base-devel git sudo
+
               useradd -m builder
+              chown -R builder:builder /work
+
               echo "builder ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
+
               su builder -c "makepkg --syncdeps --clean --noconfirm"
             '
 
