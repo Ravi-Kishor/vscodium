@@ -13,34 +13,12 @@ jobs:
     permissions:
       contents: write
 
-    container:
-      image: ghcr.io/archlinux/archlinux:latest
-      volumes:
-        - ${{ github.workspace }}:/work
-
-    defaults:
-      run:
-        working-directory: /work
-
     steps:
       # -------------------------
-      # Checkout
+      # Checkout (HOST)
       # -------------------------
       - name: Checkout repository
         uses: actions/checkout@v4
-
-      # -------------------------
-      # Install dependencies
-      # -------------------------
-      - name: Install build dependencies
-        run: |
-          pacman -Syyu --noconfirm \
-            base-devel \
-            git \
-            jq \
-            pacman-contrib \
-            curl \
-            sudo
 
       # -------------------------
       # Read current pkgver
@@ -53,9 +31,9 @@ jobs:
           echo "Current pkgver: $PKGVER"
 
       # -------------------------
-      # Check upstream version
+      # Check upstream VSCodium version
       # -------------------------
-      - name: Check upstream VSCodium version
+      - name: Check upstream version
         id: check
         run: |
           UPSTREAM=$(curl -fsSL https://api.github.com/repos/VSCodium/vscodium/releases/latest \
@@ -75,7 +53,7 @@ jobs:
           fi
 
       # -------------------------
-      # Bump pkgver (if needed)
+      # Bump pkgver (HOST GIT)
       # -------------------------
       - name: Bump pkgver
         if: steps.check.outputs.update == 'true'
@@ -90,15 +68,20 @@ jobs:
           git push
 
       # -------------------------
-      # Build package
+      # Build inside Arch container
       # -------------------------
-      - name: Build Codium package
+      - name: Build package (Arch container)
         run: |
-          useradd -m builder
-          echo "builder ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
-          chmod -R 777 /work
-
-          su builder -c 'makepkg --syncdeps --clean --noconfirm'
+          docker run --rm \
+            -v "$PWD:/work" \
+            -w /work \
+            archlinux:latest \
+            bash -c '
+              pacman -Syyu --noconfirm base-devel git sudo
+              useradd -m builder
+              echo "builder ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
+              su builder -c "makepkg --syncdeps --clean --noconfirm"
+            '
 
       # -------------------------
       # Upload GitHub Release
