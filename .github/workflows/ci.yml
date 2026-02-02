@@ -18,6 +18,10 @@ jobs:
       volumes:
         - ${{ github.workspace }}:/work
 
+    defaults:
+      run:
+        working-directory: /work
+
     steps:
       # -------------------------
       # Checkout
@@ -34,17 +38,19 @@ jobs:
             base-devel \
             git \
             jq \
-            pacman-contrib
+            pacman-contrib \
+            curl \
+            sudo
 
       # -------------------------
-      # Read pkgver (ALWAYS)
+      # Read current pkgver
       # -------------------------
       - name: Read version from PKGBUILD
         id: pkgver
         run: |
           PKGVER=$(grep '^pkgver=' PKGBUILD | cut -d= -f2)
           echo "version=$PKGVER" >> "$GITHUB_OUTPUT"
-          echo "Using pkgver: $PKGVER"
+          echo "Current pkgver: $PKGVER"
 
       # -------------------------
       # Check upstream version
@@ -61,21 +67,24 @@ jobs:
           echo "Current version:  $CURRENT"
 
           if [[ "$UPSTREAM" == "$CURRENT" ]]; then
-            echo "update=false" >> $GITHUB_OUTPUT
+            echo "update=false" >> "$GITHUB_OUTPUT"
+            echo "version=$CURRENT" >> "$GITHUB_OUTPUT"
           else
-            echo "update=true" >> $GITHUB_OUTPUT
-            echo "version=$UPSTREAM" >> $GITHUB_OUTPUT
+            echo "update=true" >> "$GITHUB_OUTPUT"
+            echo "version=$UPSTREAM" >> "$GITHUB_OUTPUT"
           fi
 
       # -------------------------
-      # Bump pkgver if needed
+      # Bump pkgver (if needed)
       # -------------------------
       - name: Bump pkgver
         if: steps.check.outputs.update == 'true'
         run: |
           sed -i "s/^pkgver=.*/pkgver=${{ steps.check.outputs.version }}/" PKGBUILD
+
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+
           git add PKGBUILD
           git commit -m "chore: bump codium to ${{ steps.check.outputs.version }}"
           git push
@@ -88,7 +97,7 @@ jobs:
           useradd -m builder
           echo "builder ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
           chmod -R 777 /work
-          cd /work
+
           su builder -c 'makepkg --syncdeps --clean --noconfirm'
 
       # -------------------------
@@ -98,8 +107,8 @@ jobs:
         uses: svenstaro/upload-release-action@v2
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
-          tag: v${{ steps.pkgver.outputs.version }}
-          release_name: Codium v${{ steps.pkgver.outputs.version }}
+          tag: v${{ steps.check.outputs.version }}
+          release_name: Codium v${{ steps.check.outputs.version }}
           prerelease: false
           overwrite: true
           file_glob: true
