@@ -1,5 +1,5 @@
 pkgname=codium
-pkgver=1.108.20787
+pkgver=
 pkgrel=1
 pkgdesc="Binary releases of VSCodium"
 arch=('x86_64')
