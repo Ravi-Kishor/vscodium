@@ -14,6 +14,7 @@ require() {
   }
 }
 
+require aria2c
 require curl
 require jq
 require tar
@@ -75,9 +76,10 @@ fi
 TMP_DIR=$(mktemp -d)
 cd "$TMP_DIR"
 
-echo "📥 Downloading:"
+echo "📥 Downloading (8 connections with aria2)..."
 echo "   $PKG_NAME"
-curl -L --fail -o "$PKG_NAME" "$ASSET_URL"
+
+aria2c -x 8 -s 8 -k 1M -o "$PKG_NAME" "$ASSET_URL"
 
 echo "🗑️ Removing old installation…"
 sudo rm -rf "$INSTALL_DIR"
